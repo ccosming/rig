@@ -6,7 +6,7 @@
     "rig": "./dist/index.js"
   },
   "scripts": {
-    "dev": "node --watch src/index.ts",
+    "dev": "node src/index.ts",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "link:local": "pnpm build && npm link"

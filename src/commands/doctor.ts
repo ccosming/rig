@@ -1,37 +1,15 @@
 import { defineCommand } from 'citty'
 import { intro, outro, log, spinner } from '@clack/prompts'
 import { execa } from 'execa'
-import { readFileSync } from 'fs'
-import { resolve, dirname } from 'path'
-import { fileURLToPath } from 'url'
-import { parse } from 'yaml'
 import pc from 'picocolors'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-
-const SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
-
-interface Tool {
-  name: string
-  brew: string
-  type?: 'formula' | 'cask'
-  required?: boolean
-}
-
-interface Registry {
-  categories: Record<string, Tool[]>
-}
+import { SPINNER_FRAMES } from '../lib/constants.ts'
+import { loadRegistry, type Tool } from '../lib/registry.ts'
 
 interface CheckResult {
   name: string
   ok: boolean
   version?: string
   hint?: string
-}
-
-function loadRegistry(): Registry {
-  const filePath = resolve(__dirname, '../../tools/macos.yaml')
-  return parse(readFileSync(filePath, 'utf8')) as Registry
 }
 
 function parseVersion(raw: string): string {
@@ -51,9 +29,9 @@ async function checkCommand(cmd: string, args: string[] = ['--version']): Promis
 async function runChecks(): Promise<{ core: CheckResult[], tools: CheckResult[] }> {
   const registry = loadRegistry()
 
-  const requiredTools = Object.values(registry.categories)
+  const requiredTools = Object.values(registry.packages)
     .flat()
-    .filter(t => t.required)
+    .filter((t: Tool) => t.required)
 
   const coreChecks: Array<{ name: string, cmd: string, args?: string[] }> = [
     { name: 'Homebrew', cmd: 'brew',    args: ['--version'] },

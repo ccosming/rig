@@ -1,27 +1,9 @@
 import { defineCommand } from 'citty'
 import { intro, outro, multiselect, confirm, spinner, cancel, log } from '@clack/prompts'
 import { execa } from 'execa'
-import { readFileSync } from 'fs'
-import { resolve, dirname } from 'path'
-import { fileURLToPath } from 'url'
-import { parse } from 'yaml'
 import pc from 'picocolors'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-
-const SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
-
-interface Tool {
-  name: string
-  description: string
-  brew: string
-  type?: 'formula' | 'cask'
-  required?: boolean
-}
-
-interface Registry {
-  categories: Record<string, Tool[]>
-}
+import { SPINNER_FRAMES } from '../lib/constants.ts'
+import { loadRegistry, type Registry, type Tool } from '../lib/registry.ts'
 
 interface VersionInfo {
   current: string
@@ -38,11 +20,6 @@ interface SelectOption {
   label: string
   hint: string
   type: 'formula' | 'cask'
-}
-
-function loadRegistry(): Registry {
-  const filePath = resolve(__dirname, '../../tools/macos.yaml')
-  return parse(readFileSync(filePath, 'utf8')) as Registry
 }
 
 async function getPackageStatus(): Promise<PackageStatus> {
@@ -91,7 +68,7 @@ async function getPackageStatus(): Promise<PackageStatus> {
 }
 
 function buildSummary(registry: Registry, status: PackageStatus): string {
-  const allPkgs = Object.values(registry.categories).flat().map(t => t.brew)
+  const allPkgs = Object.values(registry.packages).flat().map((t: Tool) => t.brew)
   const installedCount = allPkgs.filter(p => status.versions.has(p)).length
   const outdatedCount  = allPkgs.filter(p => status.outdated.has(p)).length
   const newCount       = allPkgs.filter(p => !status.versions.has(p)).length
@@ -143,9 +120,9 @@ export default defineCommand({
     const status = await getPackageStatus()
     s.stop(buildSummary(registry, status))
 
-    const allTools: SelectOption[] = Object.entries(registry.categories).flatMap(
+    const allTools: SelectOption[] = Object.entries(registry.packages).flatMap(
       ([category, tools]) =>
-        tools.map(t => ({
+        (tools as Tool[]).map(t => ({
           value: t.brew,
           label: status.outdated.has(t.brew)
             ? pc.yellow(t.name)

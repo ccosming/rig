@@ -1,5 +1,26 @@
-categories:
+tools:
+  vscodium:
+    files:
+      - source: ~/Library/Application Support/VSCodium/User/settings.json
+      - source: ~/Library/Application Support/VSCodium/User/keybindings.json
 
+  zsh:
+    files:
+      - source: ~/.zshrc
+
+  starship:
+    files:
+      - source: ~/.config/starship.toml
+
+  hammerspoon:
+    files:
+      - source: ~/.hammerspoon/init.lua
+
+  git:
+    files:
+      - source: ~/.gitconfig
+
+packages:
   shell:
     - name: starship
       description: Fast and customizable prompt

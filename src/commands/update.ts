@@ -1,13 +1,8 @@
 import { defineCommand } from 'citty'
 import { intro, outro, spinner, log } from '@clack/prompts'
 import { execa } from 'execa'
-import { dirname, resolve } from 'path'
-import { fileURLToPath } from 'url'
 import pc from 'picocolors'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const RIG_DIR = resolve(__dirname, '../../')
-const SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
+import { SPINNER_FRAMES, RIG_DIR } from '../lib/constants.ts'
 
 async function step(label: string, fn: () => Promise<void>): Promise<boolean> {
   const s = spinner({ frames: SPINNER_FRAMES })
@@ -18,7 +13,7 @@ async function step(label: string, fn: () => Promise<void>): Promise<boolean> {
     return true
   } catch (err: any) {
     s.stop(`${pc.red('✗')} ${label}`)
-    console.error(err)
+    log.error(err?.message ?? String(err))
     return false
   }
 }
