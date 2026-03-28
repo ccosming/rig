@@ -2,39 +2,174 @@ categories:
 
   shell:
     - name: starship
-      description: Prompt minimalista
+      description: Fast and customizable prompt
       brew: starship
+      type: formula
 
     - name: zoxide
-      description: cd inteligente con historial
+      description: Smarter cd with directory history
       brew: zoxide
+      type: formula
 
     - name: fzf
-      description: Fuzzy finder
+      description: Fuzzy finder for files, history and more
       brew: fzf
+      type: formula
 
-  dev:
+    - name: eza
+      description: Modern replacement for ls
+      brew: eza
+      type: formula
+
+    - name: bat
+      description: cat with syntax highlighting
+      brew: bat
+      type: formula
+
+    - name: ripgrep
+      description: Fast grep that respects .gitignore
+      brew: ripgrep
+      type: formula
+
+    - name: fd
+      description: Simple and fast alternative to find
+      brew: fd
+      type: formula
+
+    - name: tldr
+      description: Practical command examples instead of man pages
+      brew: tldr
+      type: formula
+
+    - name: htop
+      description: Interactive process monitor
+      brew: htop
+      type: formula
+
+    - name: jq
+      description: JSON processor for the terminal
+      brew: jq
+      type: formula
+
+  git:
+    - name: git
+      description: Version control system
+      brew: git
+      type: formula
+
     - name: gh
       description: GitHub CLI
       brew: gh
+      type: formula
+      required: true
 
-    - name: chezmoi
-      description: Gestor de dotfiles
-      brew: chezmoi
+    - name: lazygit
+      description: Terminal UI for git
+      brew: lazygit
+      type: formula
 
-    - name: neovim
-      description: Editor modal
+    - name: git-delta
+      description: Syntax highlighting for git diffs
+      brew: git-delta
+      type: formula
+
+  editors:
+    - name: Neovim
+      description: Hyperextensible modal editor
       brew: neovim
+      type: formula
 
-  utils:
-    - name: ripgrep
-      description: grep ultrarrápido
-      brew: ripgrep
+    - name: VSCodium
+      description: VS Code without Microsoft telemetry
+      brew: vscodium
+      type: cask
 
-    - name: bat
-      description: cat con syntax highlighting
-      brew: bat
+    - name: Cursor
+      description: AI-first code editor
+      brew: cursor
+      type: cask
 
-    - name: eza
-      description: ls moderno
-      brew: eza
+  terminal:
+    - name: Ghostty
+      description: Fast and feature-rich terminal emulator
+      brew: ghostty
+      type: cask
+
+  browsers:
+    - name: Chrome
+      description: Google Chrome
+      brew: google-chrome
+      type: cask
+
+    - name: Firefox
+      description: Mozilla Firefox
+      brew: firefox
+      type: cask
+
+    - name: Brave
+      description: Privacy-focused browser
+      brew: brave-browser
+      type: cask
+
+  containers:
+    - name: Docker Desktop
+      description: Containers and Kubernetes for macOS
+      brew: docker-desktop
+      type: cask
+
+  ai:
+    - name: Ollama
+      description: Run LLMs locally
+      brew: ollama-app
+      type: cask
+
+    - name: Claude Code
+      description: Agentic AI coding CLI by Anthropic
+      brew: claude-code
+      type: cask
+      required: true
+
+  runtimes:
+    - name: proto
+      description: Toolchain and runtime version manager
+      brew: proto
+      type: formula
+      required: true
+
+  databases:
+    - name: Beekeeper Studio
+      description: SQL editor and database manager
+      brew: beekeeper-studio
+      type: cask
+
+  api:
+    - name: HTTPie
+      description: Modern HTTP client for the terminal
+      brew: httpie
+      type: formula
+
+  productivity:
+    - name: Hammerspoon
+      description: macOS automation with Lua scripting
+      brew: hammerspoon
+      type: cask
+
+    - name: Raycast
+      description: Spotlight replacement with extensions
+      brew: raycast
+      type: cask
+
+    - name: Rectangle
+      description: Window manager via keyboard shortcuts
+      brew: rectangle
+      type: cask
+
+    - name: Notion
+      description: All-in-one workspace
+      brew: notion
+      type: cask
+
+    - name: VLC
+      description: Open source media player
+      brew: vlc
+      type: cask
