@@ -16,6 +16,7 @@ interface Tool {
   description: string
   brew: string
   type?: 'formula' | 'cask'
+  required?: boolean
 }
 
 interface Registry {

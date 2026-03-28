@@ -1,8 +1,142 @@
 import { defineCommand } from 'citty'
+import { intro, outro, log, spinner } from '@clack/prompts'
+import { execa } from 'execa'
+import { readFileSync } from 'fs'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
+import { parse } from 'yaml'
+import pc from 'picocolors'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+const SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
+
+interface Tool {
+  name: string
+  brew: string
+  type?: 'formula' | 'cask'
+  required?: boolean
+}
+
+interface Registry {
+  categories: Record<string, Tool[]>
+}
+
+interface CheckResult {
+  name: string
+  ok: boolean
+  version?: string
+  hint?: string
+}
+
+function loadRegistry(): Registry {
+  const filePath = resolve(__dirname, '../../tools/macos.yaml')
+  return parse(readFileSync(filePath, 'utf8')) as Registry
+}
+
+function parseVersion(raw: string): string {
+  const match = raw.match(/\d+\.\d+[\.\d]*/)
+  return match ? match[0] : raw
+}
+
+async function checkCommand(cmd: string, args: string[] = ['--version']): Promise<string | null> {
+  try {
+    const { stdout } = await execa(cmd, args)
+    return stdout.split('\n')[0].trim()
+  } catch {
+    return null
+  }
+}
+
+async function runChecks(): Promise<{ core: CheckResult[], tools: CheckResult[] }> {
+  const registry = loadRegistry()
+
+  const requiredTools = Object.values(registry.categories)
+    .flat()
+    .filter(t => t.required)
+
+  const coreChecks: Array<{ name: string, cmd: string, args?: string[] }> = [
+    { name: 'Homebrew', cmd: 'brew',    args: ['--version'] },
+    { name: 'git',      cmd: 'git',     args: ['--version'] },
+    { name: 'node',     cmd: 'node',    args: ['--version'] },
+    { name: 'chezmoi',  cmd: 'chezmoi', args: ['--version'] },
+  ]
+
+  const [coreResults, toolResults] = await Promise.all([
+    Promise.all(
+      coreChecks.map(async ({ name, cmd, args }): Promise<CheckResult> => {
+        const version = await checkCommand(cmd, args)
+        return {
+          name,
+          ok: version !== null,
+          version: version ? parseVersion(version) : undefined,
+        }
+      })
+    ),
+    Promise.all(
+      requiredTools.map(async (tool): Promise<CheckResult> => {
+        try {
+          const { stdout } = await execa('brew', ['info', '--json=v2', tool.brew])
+          const data = JSON.parse(stdout)
+
+          const entry = tool.type === 'cask'
+            ? data.casks?.[0]
+            : data.formulae?.[0]
+
+          const installed = tool.type === 'cask'
+            ? entry?.installed
+            : entry?.installed?.[0]?.version
+
+          if (!installed) {
+            return { name: tool.name, ok: false, hint: 'not installed' }
+          }
+
+          return {
+            name: tool.name,
+            ok: true,
+            version: parseVersion(installed),
+          }
+        } catch {
+          return { name: tool.name, ok: false, hint: 'not installed' }
+        }
+      })
+    ),
+  ])
+
+  return { core: coreResults, tools: toolResults }
+}
+
+function printResults(label: string, results: CheckResult[]) {
+  log.message(pc.dim(`── ${label}`))
+  for (const r of results) {
+    const icon    = r.ok ? pc.green('✓') : pc.red('✗')
+    const name    = r.ok ? pc.green(r.name) : pc.red(r.name)
+    const version = r.version ? pc.dim(`  ${r.version}`) : ''
+    const hint    = r.hint    ? pc.dim(`  ${r.hint}`)    : ''
+    log.message(`  ${icon}  ${name}${version}${hint}`)
+  }
+}
 
 export default defineCommand({
-  meta: { description: '...' },
+  meta: { description: 'Verify environment health' },
   async run() {
-    console.log('WIP')
+    intro(pc.bgCyan(pc.black(' rig doctor ')))
+
+    const s = spinner({ frames: SPINNER_FRAMES })
+    s.start('Running checks...')
+    const { core, tools } = await runChecks()
+    s.stop('Done')
+
+    const allOk      = [...core, ...tools].every(r => r.ok)
+    const failCount  = [...core, ...tools].filter(r => !r.ok).length
+
+    printResults('core', core)
+    printResults('required tools', tools)
+
+    if (allOk) {
+      outro(pc.green('All checks passed.'))
+    } else {
+      outro(pc.yellow(`${failCount} check(s) failed — run ${pc.cyan('rig install')} to fix`))
+    }
   },
 })
