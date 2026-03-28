@@ -1,0 +1,23 @@
+{
+  "name": "rig",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "rig": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "build": "tsc",
+    "link:local": "pnpm build && npm link"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.1.0",
+    "citty": "^0.2.1",
+    "execa": "^9.6.1",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.0",
+    "typescript": "^6.0.2"
+  }
+}

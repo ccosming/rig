@@ -1,0 +1,40 @@
+categories:
+
+  shell:
+    - name: starship
+      description: Prompt minimalista
+      brew: starship
+
+    - name: zoxide
+      description: cd inteligente con historial
+      brew: zoxide
+
+    - name: fzf
+      description: Fuzzy finder
+      brew: fzf
+
+  dev:
+    - name: gh
+      description: GitHub CLI
+      brew: gh
+
+    - name: chezmoi
+      description: Gestor de dotfiles
+      brew: chezmoi
+
+    - name: neovim
+      description: Editor modal
+      brew: neovim
+
+  utils:
+    - name: ripgrep
+      description: grep ultrarrápido
+      brew: ripgrep
+
+    - name: bat
+      description: cat con syntax highlighting
+      brew: bat
+
+    - name: eza
+      description: ls moderno
+      brew: eza

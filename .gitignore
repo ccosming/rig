@@ -1,0 +1,7 @@
+# OS files
+.DS_Store
+
+# Deps and generated files
+node_modules
+dist/
+*.js.map
