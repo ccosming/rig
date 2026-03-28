@@ -9,10 +9,13 @@ import pc from 'picocolors'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+const SPINNER_FRAMES = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
+
 interface Tool {
   name: string
   description: string
   brew: string
+  type?: 'formula' | 'cask'
 }
 
 interface Registry {
@@ -25,8 +28,15 @@ interface VersionInfo {
 }
 
 interface PackageStatus {
-  versions: Map<string, string>        // pkg → installed version
-  outdated: Map<string, VersionInfo>   // pkg → { current, latest }
+  versions: Map<string, string>
+  outdated: Map<string, VersionInfo>
+}
+
+interface SelectOption {
+  value: string
+  label: string
+  hint: string
+  type: 'formula' | 'cask'
 }
 
 function loadRegistry(): Registry {
@@ -35,26 +45,44 @@ function loadRegistry(): Registry {
 }
 
 async function getPackageStatus(): Promise<PackageStatus> {
-  const [versionsResult, outdatedResult] = await Promise.allSettled([
-    execa('brew', ['list', '--formula', '--versions']),
-    execa('brew', ['outdated', '--verbose']),
+  const [infoResult, outdatedResult] = await Promise.allSettled([
+    execa('brew', ['info', '--json=v2', '--installed']),
+    execa('brew', ['outdated', '--json=v2']),
   ])
 
-  // "neovim 0.10.0\nripgrep 14.1.0"
   const versions = new Map<string, string>()
-  if (versionsResult.status === 'fulfilled') {
-    for (const line of versionsResult.value.stdout.split('\n').filter(Boolean)) {
-      const [pkg, version] = line.trim().split(/\s+/)
-      if (pkg && version) versions.set(pkg, version)
+
+  if (infoResult.status === 'fulfilled') {
+    const data = JSON.parse(infoResult.value.stdout)
+
+    for (const formula of data.formulae ?? []) {
+      const version = formula.installed?.[0]?.version
+      if (formula.name && version) versions.set(formula.name, version)
+    }
+
+    for (const cask of data.casks ?? []) {
+      const version = cask.installed
+      if (cask.token && version) versions.set(cask.token, version)
     }
   }
 
-  // "neovim (0.9.4) < 0.10.0"
   const outdated = new Map<string, VersionInfo>()
+
   if (outdatedResult.status === 'fulfilled') {
-    for (const line of outdatedResult.value.stdout.split('\n').filter(Boolean)) {
-      const match = line.match(/^(\S+)\s+\((.+?)\)\s+<\s+(.+)$/)
-      if (match) outdated.set(match[1], { current: match[2], latest: match[3] })
+    const data = JSON.parse(outdatedResult.value.stdout)
+
+    for (const formula of data.formulae ?? []) {
+      outdated.set(formula.name, {
+        current: formula.installed_versions?.[0] ?? '',
+        latest:  formula.current_version ?? '',
+      })
+    }
+
+    for (const cask of data.casks ?? []) {
+      outdated.set(cask.name, {
+        current: cask.installed_versions?.[0] ?? '',
+        latest:  cask.current_version ?? '',
+      })
     }
   }
 
@@ -91,18 +119,30 @@ function buildHint(
   return pc.dim(`${category} · ${description}`)
 }
 
+function brewInstall(pkg: string, type: 'formula' | 'cask' = 'formula') {
+  return type === 'cask'
+    ? execa('brew', ['install', '--cask', pkg])
+    : execa('brew', ['install', pkg])
+}
+
+function brewUpgrade(pkg: string, type: 'formula' | 'cask' = 'formula') {
+  return type === 'cask'
+    ? execa('brew', ['upgrade', '--cask', pkg])
+    : execa('brew', ['upgrade', pkg])
+}
+
 export default defineCommand({
   meta: { description: 'Install tools from the registry' },
   async run() {
     intro(pc.bgCyan(pc.black(' rig install ')))
 
-    const s = spinner()
+    const s = spinner({ frames: SPINNER_FRAMES })
     s.start('Checking package status...')
     const registry = loadRegistry()
     const status = await getPackageStatus()
     s.stop(buildSummary(registry, status))
 
-    const allTools = Object.entries(registry.categories).flatMap(
+    const allTools: SelectOption[] = Object.entries(registry.categories).flatMap(
       ([category, tools]) =>
         tools.map(t => ({
           value: t.brew,
@@ -112,6 +152,7 @@ export default defineCommand({
               ? pc.green(t.name)
               : t.name,
           hint: buildHint(t.brew, category, t.description, status),
+          type: t.type ?? 'formula',
         }))
     )
 
@@ -135,8 +176,11 @@ export default defineCommand({
       process.exit(0)
     }
 
-    const toInstall = (selected as string[]).filter(p => !status.versions.has(p))
-    const toUpgrade = (selected as string[]).filter(p => status.outdated.has(p))
+    const selectedPkgs = selected as string[]
+    const toolMap = new Map(allTools.map(t => [t.value, t]))
+
+    const toInstall = selectedPkgs.filter(p => !status.versions.has(p))
+    const toUpgrade = selectedPkgs.filter(p => status.outdated.has(p))
 
     if (toInstall.length === 0 && toUpgrade.length === 0) {
       outro(pc.green('Everything is up to date.'))
@@ -157,12 +201,13 @@ export default defineCommand({
       process.exit(0)
     }
 
-    const sp = spinner()
+    const sp = spinner({ frames: SPINNER_FRAMES })
 
     for (const pkg of toInstall) {
+      const type = toolMap.get(pkg)?.type ?? 'formula'
       sp.start(`Installing ${pc.cyan(pkg)}...`)
       try {
-        await execa('brew', ['install', pkg])
+        await brewInstall(pkg, type)
         sp.stop(`${pc.green('✓')} ${pkg}`)
       } catch {
         sp.stop(`${pc.red('✗')} ${pkg} — failed`)
@@ -170,9 +215,10 @@ export default defineCommand({
     }
 
     for (const pkg of toUpgrade) {
+      const type = toolMap.get(pkg)?.type ?? 'formula'
       sp.start(`Upgrading ${pc.yellow(pkg)}...`)
       try {
-        await execa('brew', ['upgrade', pkg])
+        await brewUpgrade(pkg, type)
         sp.stop(`${pc.green('✓')} ${pkg} upgraded`)
       } catch {
         sp.stop(`${pc.red('✗')} ${pkg} — failed`)
