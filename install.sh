@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# rig / bootstrap.sh
-# Instala rig en un equipo nuevo desde cero.
-# Uso: curl -fsSL https://raw.githubusercontent.com/ccosming/rig/main/bootstrap.sh | bash
+# rig / install.sh
+# Bootstraps rig on a new machine from scratch.
+# Usage: curl -fsSL https://raw.githubusercontent.com/ccosming/rig/main/install.sh | bash
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-RIG_REPO="https://github.com/TU_USUARIO/rig.git"
+RIG_REPO="https://github.com/ccosming/rig.git"
 RIG_DIR="$HOME/.rig"
 
-# ─── Colores ─────────────────────────────────────────────────────────────────
+# ─── Colors ──────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -24,13 +24,13 @@ fail() { echo -e "  ${RED}✗${RESET} $1"; exit 1; }
 
 # ─── Header ──────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}  rig bootstrap${RESET} ${DIM}— machine provisioning${RESET}"
+echo -e "${CYAN}  rig install${RESET} ${DIM}— machine provisioning${RESET}"
 echo -e "${DIM}  ──────────────────────────────────────${RESET}"
 echo ""
 
 # ─── macOS check ─────────────────────────────────────────────────────────────
 if [[ "$OSTYPE" != "darwin"* ]]; then
-  fail "bootstrap.sh only supports macOS for now."
+  fail "install.sh only supports macOS for now."
 fi
 
 # ─── 1. Xcode Command Line Tools ─────────────────────────────────────────────
@@ -38,7 +38,7 @@ info "Checking Xcode Command Line Tools..."
 if ! xcode-select -p &>/dev/null; then
   warn "Installing Xcode Command Line Tools..."
   xcode-select --install
-  echo "  Re-run bootstrap.sh after the installation completes."
+  echo "  Re-run install.sh after the installation completes."
   exit 0
 fi
 ok "Xcode CLT"
@@ -94,7 +94,7 @@ if ! command -v chezmoi &>/dev/null; then
 fi
 ok "chezmoi"
 
-# ─── 7. Clonar rig ───────────────────────────────────────────────────────────
+# ─── 7. Clone rig ────────────────────────────────────────────────────────────
 info "Checking rig..."
 if [[ -d "$RIG_DIR" ]]; then
   warn "~/.rig already exists — pulling latest..."
@@ -105,7 +105,7 @@ else
 fi
 ok "rig cloned at $RIG_DIR"
 
-# ─── 8. Instalar dependencias y linkear CLI ──────────────────────────────────
+# ─── 8. Install dependencies and link CLI ────────────────────────────────────
 info "Installing rig dependencies..."
 cd "$RIG_DIR"
 pnpm install --frozen-lockfile
@@ -113,7 +113,7 @@ pnpm build
 npm link
 ok "rig CLI linked"
 
-# ─── 9. Inicializar chezmoi apuntando a rig/dotfiles ─────────────────────────
+# ─── 9. Initialize chezmoi pointing to rig/dotfiles ──────────────────────────
 info "Initializing chezmoi..."
 if [[ ! -d "$HOME/.local/share/chezmoi" ]]; then
   chezmoi init --source "$RIG_DIR/dotfiles"
@@ -126,7 +126,7 @@ fi
 echo ""
 echo -e "${DIM}  ──────────────────────────────────────${RESET}"
 echo ""
-echo -e "  ${GREEN}Bootstrap complete.${RESET}"
+echo -e "  ${GREEN}Installation complete.${RESET}"
 echo ""
 echo -e "  Next steps:"
 echo -e "    ${CYAN}rig doctor${RESET}   — verify your environment"
