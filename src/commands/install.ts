@@ -3,7 +3,7 @@ import { intro, outro, multiselect, confirm, spinner, cancel, log } from '@clack
 import { execa } from 'execa'
 import pc from 'picocolors'
 import { SPINNER_FRAMES } from '../lib/constants.ts'
-import { loadRegistry, type Registry, type Tool } from '../lib/registry.ts'
+import { loadRegistry, toolId, type Registry, type Tool, type PackageGroup } from '../lib/registry.ts'
 
 interface VersionInfo {
   current: string
@@ -20,12 +20,15 @@ interface SelectOption {
   label: string
   hint: string
   type: 'formula' | 'cask'
+  required: boolean
 }
 
 async function getPackageStatus(): Promise<PackageStatus> {
-  const [infoResult, outdatedResult] = await Promise.allSettled([
+  const [infoResult, outdatedResult, protoStatusResult, protoOutdatedResult] = await Promise.allSettled([
     execa('brew', ['info', '--json=v2', '--installed']),
     execa('brew', ['outdated', '--json=v2']),
+    execa('proto', ['status', '-c', 'global', '--json']),
+    execa('proto', ['outdated', '-c', 'global', '--json']),
   ])
 
   const versions = new Map<string, string>()
@@ -39,8 +42,15 @@ async function getPackageStatus(): Promise<PackageStatus> {
     }
 
     for (const cask of data.casks ?? []) {
-      const version = cask.installed
+      const version = cask.installed?.split(',')[0]
       if (cask.token && version) versions.set(cask.token, version)
+    }
+  }
+
+  if (protoStatusResult.status === 'fulfilled') {
+    const data = JSON.parse(protoStatusResult.value.stdout)
+    for (const [name, info] of Object.entries(data) as [string, any][]) {
+      if (info.is_installed) versions.set(name, info.resolved_version)
     }
   }
 
@@ -58,9 +68,20 @@ async function getPackageStatus(): Promise<PackageStatus> {
 
     for (const cask of data.casks ?? []) {
       outdated.set(cask.name, {
-        current: cask.installed_versions?.[0] ?? '',
-        latest:  cask.current_version ?? '',
+        current: cask.installed_versions?.[0]?.split(',')[0] ?? '',
+        latest:  cask.current_version?.split(',')[0] ?? '',
       })
+    }
+  }
+
+  if (protoOutdatedResult.status === 'fulfilled') {
+    const data = JSON.parse(protoOutdatedResult.value.stdout)
+    for (const [name, info] of Object.entries(data) as [string, any][]) {
+      const pinned = info.current_version ?? ''
+      const latest = info.newest_version ?? ''
+      if (info.is_outdated && pinned !== latest) {
+        outdated.set(name, { current: pinned, latest })
+      }
     }
   }
 
@@ -68,7 +89,7 @@ async function getPackageStatus(): Promise<PackageStatus> {
 }
 
 function buildSummary(registry: Registry, status: PackageStatus): string {
-  const allPkgs = Object.values(registry.packages).flat().map((t: Tool) => t.brew)
+  const allPkgs = Object.values(registry.packages).flatMap((g: PackageGroup) => g.tools).map((t: Tool) => toolId(t))
   const installedCount = allPkgs.filter(p => status.versions.has(p)).length
   const outdatedCount  = allPkgs.filter(p => status.outdated.has(p)).length
   const newCount       = allPkgs.filter(p => !status.versions.has(p)).length
@@ -83,35 +104,56 @@ function buildSummary(registry: Registry, status: PackageStatus): string {
 function buildHint(
   pkg: string,
   category: string,
+  emoji: string,
   description: string,
-  status: PackageStatus
+  status: PackageStatus,
+  required = false
 ): string {
   const versionInfo = status.outdated.get(pkg)
   if (versionInfo)
-    return pc.yellow(`↑ ${versionInfo.current} → ${versionInfo.latest}`)
+    return pc.yellow(`↑ update available  ${versionInfo.current} → ${versionInfo.latest}`) + pc.dim(`  ·  ${emoji} ${category} · ${description}`)
 
   const installedVersion = status.versions.get(pkg)
   if (installedVersion)
     return pc.green(`✓ v${installedVersion}`)
 
-  return pc.dim(`${category} · ${description}`)
+  const badge = required ? pc.magenta('★ required') + ' · ' : ''
+  return badge + pc.dim(`${emoji} ${category} · ${description}`)
 }
 
-function brewInstall(pkg: string, type: 'formula' | 'cask' = 'formula') {
-  return type === 'cask'
-    ? execa('brew', ['install', '--cask', pkg])
-    : execa('brew', ['install', pkg])
+
+function installTool(t: Tool) {
+  if (t.installer === 'proto') {
+    const args = ['pin', t.name, '--global']
+    if (t.version) args.splice(2, 0, t.version)
+    return execa('proto', args)
+  }
+  return t.type === 'cask'
+    ? execa('brew', ['install', '--cask', t.name])
+    : execa('brew', ['install', t.name])
 }
 
-function brewUpgrade(pkg: string, type: 'formula' | 'cask' = 'formula') {
-  return type === 'cask'
-    ? execa('brew', ['upgrade', '--cask', pkg])
-    : execa('brew', ['upgrade', pkg])
+function upgradeTool(t: Tool) {
+  if (t.installer === 'proto') {
+    const args = ['pin', t.name, '--global']
+    if (t.version) args.splice(2, 0, t.version)
+    return execa('proto', args)
+  }
+  return t.type === 'cask'
+    ? execa('brew', ['upgrade', '--cask', t.name])
+    : execa('brew', ['upgrade', t.name])
 }
 
 export default defineCommand({
   meta: { description: 'Install tools from the registry' },
-  async run() {
+  args: {
+    all: {
+      type: 'boolean',
+      description: 'Show all tools including already installed',
+      default: false,
+    },
+  },
+  async run({ args }) {
     intro(pc.bgCyan(pc.black(' rig install ')))
 
     const s = spinner({ frames: SPINNER_FRAMES })
@@ -120,31 +162,69 @@ export default defineCommand({
     const status = await getPackageStatus()
     s.stop(buildSummary(registry, status))
 
-    const allTools: SelectOption[] = Object.entries(registry.packages).flatMap(
-      ([category, tools]) =>
-        (tools as Tool[]).map(t => ({
-          value: t.brew,
-          label: status.outdated.has(t.brew)
-            ? pc.yellow(t.name)
-            : status.versions.has(t.brew)
-              ? pc.green(t.name)
-              : t.name,
-          hint: buildHint(t.brew, category, t.description, status),
-          type: t.type ?? 'formula',
-        }))
+    const rawTools: { option: SelectOption, tool: Tool }[] = Object.entries(registry.packages).flatMap(
+      ([category, group]) =>
+        group.tools.map(t => {
+          const id = toolId(t)
+          return {
+            tool: t,
+            option: {
+              value: id,
+              label: status.outdated.has(id)
+                ? pc.yellow(t.name.toLowerCase())
+                : status.versions.has(id)
+                  ? pc.green(t.name.toLowerCase())
+                  : t.required
+                    ? pc.magenta(t.name.toLowerCase())
+                    : t.name.toLowerCase(),
+              hint: buildHint(id, category, group.emoji, t.description, status, t.required),
+              type: t.type ?? 'formula',
+              required: t.required ?? false,
+            },
+          }
+        })
     )
 
-    const preSelected = allTools
-      .filter(t => status.versions.has(t.value))
+    const allTools = rawTools.map(r => r.option)
+    const toolMap  = new Map(rawTools.map(r => [r.option.value, r.tool]))
+
+    const isUpToDate = (t: SelectOption) =>
+      status.versions.has(t.value) && !status.outdated.has(t.value)
+
+    const toolPriority = (t: SelectOption) => {
+      if (t.required && !status.versions.has(t.value)) return 0
+      if (status.outdated.has(t.value))                return 1
+      if (!status.versions.has(t.value))               return 2
+      return 3
+    }
+    allTools.sort((a, b) => toolPriority(a) - toolPriority(b))
+
+    const visibleTools = args.all
+      ? allTools
+      : allTools.filter(t => !isUpToDate(t))
+
+    if (visibleTools.length === 0) {
+      outro(pc.green('Everything is up to date. Run with --all to see all tools.'))
+      process.exit(0)
+    }
+
+    if (!args.all) {
+      const hiddenCount = allTools.length - visibleTools.length
+      if (hiddenCount > 0)
+        log.info(`${hiddenCount} up-to-date tool(s) hidden — run with ${pc.cyan('--all')} to show`)
+    }
+
+    const preSelected = visibleTools
+      .filter(t => status.versions.has(t.value) || t.required)
       .map(t => t.value)
 
-    const outdatedInRegistry = allTools.filter(t => status.outdated.has(t.value))
+    const outdatedInRegistry = visibleTools.filter(t => status.outdated.has(t.value))
     if (outdatedInRegistry.length > 0)
       log.warn(`${outdatedInRegistry.length} tool(s) have updates available — pre-selected`)
 
     const selected = await multiselect({
       message: 'Select tools to install',
-      options: allTools,
+      options: visibleTools,
       initialValues: preSelected,
       required: true,
     })
@@ -155,7 +235,6 @@ export default defineCommand({
     }
 
     const selectedPkgs = selected as string[]
-    const toolMap = new Map(allTools.map(t => [t.value, t]))
 
     const toInstall = selectedPkgs.filter(p => !status.versions.has(p))
     const toUpgrade = selectedPkgs.filter(p => status.outdated.has(p))
@@ -182,10 +261,10 @@ export default defineCommand({
     const sp = spinner({ frames: SPINNER_FRAMES })
 
     for (const pkg of toInstall) {
-      const type = toolMap.get(pkg)?.type ?? 'formula'
+      const tool = toolMap.get(pkg)!
       sp.start(`Installing ${pc.cyan(pkg)}...`)
       try {
-        await brewInstall(pkg, type)
+        await installTool(tool)
         sp.stop(`${pc.green('✓')} ${pkg}`)
       } catch {
         sp.stop(`${pc.red('✗')} ${pkg} — failed`)
@@ -193,10 +272,10 @@ export default defineCommand({
     }
 
     for (const pkg of toUpgrade) {
-      const type = toolMap.get(pkg)?.type ?? 'formula'
+      const tool = toolMap.get(pkg)!
       sp.start(`Upgrading ${pc.yellow(pkg)}...`)
       try {
-        await brewUpgrade(pkg, type)
+        await upgradeTool(tool)
         sp.stop(`${pc.green('✓')} ${pkg} upgraded`)
       } catch {
         sp.stop(`${pc.red('✗')} ${pkg} — failed`)

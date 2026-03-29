@@ -6,17 +6,27 @@ import { RIG_DIR } from './constants.ts'
 export interface Tool {
   name: string
   description: string
-  brew: string
+  installer?: 'brew' | 'proto'
   type?: 'formula' | 'cask'
+  version?: string
   required?: boolean
+}
+
+export function toolId(t: Tool): string {
+  return t.name
 }
 
 export interface ToolConfig {
   files: { source: string }[]
 }
 
+export interface PackageGroup {
+  emoji: string
+  tools: Tool[]
+}
+
 export interface Registry {
-  packages: Record<string, Tool[]>
+  packages: Record<string, PackageGroup>
   tools: Record<string, ToolConfig>
 }
 
