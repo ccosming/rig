@@ -11,8 +11,13 @@ export interface Tool {
   required?: boolean
 }
 
+export interface ToolConfig {
+  files: { source: string }[]
+}
+
 export interface Registry {
   packages: Record<string, Tool[]>
+  tools: Record<string, ToolConfig>
 }
 
 export function loadRegistry(): Registry {
