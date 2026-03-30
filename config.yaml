@@ -1,29 +1,3 @@
-tools:
-  vscodium:
-    files:
-      - source: ~/Library/Application Support/VSCodium/User/settings.json
-      - source: ~/Library/Application Support/VSCodium/User/keybindings.json
-
-  zsh:
-    files:
-      - source: ~/.zshrc
-
-  starship:
-    files:
-      - source: ~/.config/starship.toml
-
-  hammerspoon:
-    files:
-      - source: ~/.hammerspoon/init.lua
-
-  ghostty:
-    files:
-      - source: ~/.config/ghostty/config
-
-  git:
-    files:
-      - source: ~/.gitconfig
-
 packages:
   shell:
     emoji: 🐚
@@ -31,6 +5,9 @@ packages:
       - name: starship
         description: Fast and customizable prompt
         type: formula
+        sync:
+          files:
+            - source: ~/.config/starship.toml
 
       - name: zoxide
         description: Smarter cd with directory history
@@ -74,6 +51,10 @@ packages:
       - name: git
         description: Version control system
         type: formula
+        core: true
+        sync:
+          files:
+            - source: ~/.gitconfig
 
       - name: gh
         description: GitHub CLI
@@ -98,6 +79,10 @@ packages:
       - name: vscodium
         description: VS Code without Microsoft telemetry
         type: cask
+        sync:
+          files:
+            - source: ~/Library/Application Support/VSCodium/User/settings.json
+            - source: ~/Library/Application Support/VSCodium/User/keybindings.json
 
       - name: cursor
         description: AI-first code editor
@@ -109,6 +94,9 @@ packages:
       - name: ghostty
         description: Fast and feature-rich terminal emulator
         type: cask
+        sync:
+          files:
+            - source: ~/.config/ghostty/config
 
   browsers:
     emoji: 🌐
@@ -150,13 +138,13 @@ packages:
       - name: proto
         description: Toolchain and runtime version manager
         type: formula
-        required: true
+        core: true
 
       - name: node
         description: JavaScript runtime
         installer: proto
         version: lts
-        required: true
+        core: true
 
       - name: pnpm
         description: Fast, disk space efficient package manager
@@ -169,7 +157,7 @@ packages:
       - name: chezmoi
         description: Dotfile manager
         type: formula
-        required: true
+        core: true
 
   databases:
     emoji: 🗄️
@@ -191,6 +179,9 @@ packages:
       - name: hammerspoon
         description: macOS automation with Lua scripting
         type: cask
+        sync:
+          files:
+            - source: ~/.hammerspoon/init.lua
 
       - name: raycast
         description: Spotlight replacement with extensions
@@ -207,3 +198,13 @@ packages:
       - name: vlc
         description: Open source media player
         type: cask
+
+  zsh:
+    emoji: 🐚
+    tools:
+      - name: zsh
+        description: Z shell configuration
+        core: true
+        sync:
+          files:
+            - source: ~/.zshrc

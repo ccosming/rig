@@ -3,7 +3,7 @@ import { intro, outro, multiselect, confirm, spinner, cancel, log } from '@clack
 import { execa } from 'execa'
 import pc from 'picocolors'
 import { SPINNER_FRAMES } from '../lib/constants.ts'
-import { loadRegistry, toolId, type Registry, type Tool, type PackageGroup } from '../lib/registry.ts'
+import { loadRegistry, toolId, allTools, type Registry, type Tool, type PackageGroup } from '../lib/registry.ts'
 
 interface VersionInfo {
   current: string
@@ -89,7 +89,7 @@ async function getPackageStatus(): Promise<PackageStatus> {
 }
 
 function buildSummary(registry: Registry, status: PackageStatus): string {
-  const allPkgs = Object.values(registry.packages).flatMap((g: PackageGroup) => g.tools).map((t: Tool) => toolId(t))
+  const allPkgs = allTools(registry).map((t: Tool) => toolId(t))
   const installedCount = allPkgs.filter(p => status.versions.has(p)).length
   const outdatedCount  = allPkgs.filter(p => status.outdated.has(p)).length
   const newCount       = allPkgs.filter(p => !status.versions.has(p)).length
@@ -164,25 +164,27 @@ export default defineCommand({
 
     const rawTools: { option: SelectOption, tool: Tool }[] = Object.entries(registry.packages).flatMap(
       ([category, group]) =>
-        group.tools.map(t => {
-          const id = toolId(t)
-          return {
-            tool: t,
-            option: {
-              value: id,
-              label: status.outdated.has(id)
-                ? pc.yellow(t.name.toLowerCase())
-                : status.versions.has(id)
-                  ? pc.green(t.name.toLowerCase())
-                  : t.required
-                    ? pc.magenta(t.name.toLowerCase())
-                    : t.name.toLowerCase(),
-              hint: buildHint(id, category, group.emoji, t.description, status, t.required),
-              type: t.type ?? 'formula',
-              required: t.required ?? false,
-            },
-          }
-        })
+        group.tools
+          .filter(t => t.type || t.installer)  // skip non-installable tools (e.g. system zsh)
+          .map(t => {
+            const id = toolId(t)
+            return {
+              tool: t,
+              option: {
+                value: id,
+                label: status.outdated.has(id)
+                  ? pc.yellow(t.name.toLowerCase())
+                  : status.versions.has(id)
+                    ? pc.green(t.name.toLowerCase())
+                    : t.required
+                      ? pc.magenta(t.name.toLowerCase())
+                      : t.name.toLowerCase(),
+                hint: buildHint(id, category, group.emoji, t.description, status, t.required),
+                type: t.type ?? 'formula',
+                required: t.required ?? false,
+              },
+            }
+          })
     )
 
     const allTools = rawTools.map(r => r.option)

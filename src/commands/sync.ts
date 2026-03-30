@@ -1,67 +1,76 @@
 import { defineCommand } from 'citty'
-import { intro, outro, multiselect, spinner, cancel, log } from '@clack/prompts'
+import { intro, outro, multiselect, spinner, cancel } from '@clack/prompts'
 import { execa } from 'execa'
 import { homedir } from 'os'
 import { resolve } from 'path'
 import pc from 'picocolors'
 import { SPINNER_FRAMES, RIG_DIR } from '../lib/constants.ts'
-import { loadRegistry, type ToolConfig } from '../lib/registry.ts'
+import { loadRegistry, allTools, isManaged, type Tool } from '../lib/registry.ts'
 
 const DOTFILES_DIR = resolve(RIG_DIR, 'dotfiles')
+
+function chezmoi(args: string[]) {
+  return execa('chezmoi', ['-S', DOTFILES_DIR, ...args])
+}
 
 function expandHome(p: string): string {
   return p.startsWith('~/') ? resolve(homedir(), p.slice(2)) : p
 }
 
-async function ensureChezmoiInit(): Promise<boolean> {
-  try {
-    const { stdout } = await execa('chezmoi', ['source-path'])
-    if (stdout.trim() !== DOTFILES_DIR) {
-      await execa('chezmoi', ['init', '--source', DOTFILES_DIR])
-    }
-    return true
-  } catch {
-    try {
-      await execa('chezmoi', ['init', '--source', DOTFILES_DIR])
-      return true
-    } catch {
-      return false
-    }
-  }
-}
-
 async function getManagedFiles(): Promise<Set<string>> {
   try {
-    const { stdout } = await execa('chezmoi', ['managed', '--path-style', 'absolute'])
+    const { stdout } = await chezmoi(['managed', '--path-style', 'absolute'])
     return new Set(stdout.trim().split('\n').filter(Boolean))
   } catch {
     return new Set()
   }
 }
 
-type SyncStatus = 'synced' | 'partial' | 'new'
-
-function getToolStatus(tool: ToolConfig, managed: Set<string>): SyncStatus {
-  const files = tool.files.map(f => expandHome(f.source))
-  const managedCount = files.filter(f => managed.has(f)).length
-  if (managedCount === files.length) return 'synced'
-  if (managedCount > 0) return 'partial'
-  return 'new'
+async function getPendingFiles(): Promise<Set<string>> {
+  try {
+    const { stdout } = await chezmoi(['status'])
+    return new Set(
+      stdout.trim().split('\n').filter(Boolean)
+        .map(line => resolve(homedir(), line.slice(2)))
+    )
+  } catch {
+    return new Set()
+  }
 }
 
-function statusLabel(status: SyncStatus): string {
+type SyncStatus = 'pending' | 'new' | 'partial' | 'synced'
+
+function getToolStatus(sync: { files: { source: string }[] }, managed: Set<string>, pending: Set<string>): SyncStatus {
+  const files = sync.files.map(f => expandHome(f.source))
+  const managedCount = files.filter(f => managed.has(f)).length
+
+  if (managedCount === 0) return 'new'
+  if (managedCount < files.length) return 'partial'
+  if (files.some(f => pending.has(f))) return 'pending'
+  return 'synced'
+}
+
+function statusHint(status: SyncStatus): string {
   if (status === 'synced')  return pc.green('✓ synced')
+  if (status === 'pending') return pc.yellow('~ pending')
   if (status === 'partial') return pc.yellow('~ partial')
   return pc.dim('new')
 }
 
-async function syncTool(name: string, tool: ToolConfig, managed: Set<string>): Promise<void> {
-  for (const { source } of tool.files) {
+function toolPriority(status: SyncStatus): number {
+  if (status === 'pending') return 0
+  if (status === 'partial') return 1
+  if (status === 'new')     return 2
+  return 3
+}
+
+async function syncTool(tool: Tool, managed: Set<string>): Promise<void> {
+  for (const { source } of tool.sync!.files) {
     const dest = expandHome(source)
     if (managed.has(dest)) {
-      await execa('chezmoi', ['apply', dest])
+      await chezmoi(['apply', dest])
     } else {
-      await execa('chezmoi', ['add', dest])
+      await chezmoi(['add', dest])
     }
   }
 }
@@ -72,33 +81,30 @@ export default defineCommand({
     intro(pc.bgCyan(pc.black(' rig sync ')))
 
     const s = spinner({ frames: SPINNER_FRAMES })
-    s.start('Checking chezmoi...')
-    const initialized = await ensureChezmoiInit()
+    s.start('Checking dotfiles status...')
 
-    if (!initialized) {
-      s.stop(pc.red('✗ chezmoi init failed'))
-      outro(pc.red('Make sure chezmoi is installed: brew install chezmoi'))
-      process.exit(1)
-    }
-
-    const managed = await getManagedFiles()
     const registry = loadRegistry()
-    s.stop(`chezmoi source: ${pc.dim(DOTFILES_DIR)}`)
+    const [managed, pending] = await Promise.all([getManagedFiles(), getPendingFiles()])
 
-    const tools = Object.entries(registry.tools)
+    s.stop(`source: ${pc.dim(DOTFILES_DIR)}`)
 
-    const options = tools.map(([name, tool]) => {
-      const status = getToolStatus(tool, managed)
-      return {
-        value: name,
-        label: status === 'new' ? name : (status === 'synced' ? pc.green(name) : pc.yellow(name)),
-        hint: statusLabel(status),
-      }
-    })
+    const managedTools = allTools(registry).filter(isManaged)
 
-    const preSelected = tools
-      .filter(([, tool]) => getToolStatus(tool, managed) !== 'new')
-      .map(([name]) => name)
+    const options = managedTools
+      .map(tool => {
+        const status = getToolStatus(tool.sync!, managed, pending)
+        return {
+          value: tool.name,
+          label: status === 'synced' ? pc.green(tool.name) : status === 'new' ? tool.name : pc.yellow(tool.name),
+          hint: statusHint(status),
+          _priority: toolPriority(status),
+        }
+      })
+      .sort((a, b) => a._priority - b._priority)
+
+    const preSelected = managedTools
+      .filter(tool => getToolStatus(tool.sync!, managed, pending) !== 'new')
+      .map(tool => tool.name)
 
     const selected = await multiselect({
       message: 'Select tools to sync',
@@ -113,7 +119,7 @@ export default defineCommand({
     }
 
     const selectedTools = selected as string[]
-    const toolMap = Object.fromEntries(tools)
+    const toolMap = new Map(managedTools.map(t => [t.name, t]))
 
     const sp = spinner({ frames: SPINNER_FRAMES })
     const results: { name: string, ok: boolean }[] = []
@@ -121,7 +127,7 @@ export default defineCommand({
     for (const name of selectedTools) {
       sp.start(`Syncing ${pc.cyan(name)}...`)
       try {
-        await syncTool(name, toolMap[name], managed)
+        await syncTool(toolMap.get(name)!, managed)
         sp.stop(`${pc.green('✓')} ${name}`)
         results.push({ name, ok: true })
       } catch (err: any) {
