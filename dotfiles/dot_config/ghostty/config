@@ -1,0 +1,20 @@
+theme = Rose Pine Moon
+
+shell-integration = zsh
+background-opacity = 0.9
+background-blur-radius = 40
+
+font-family = JetBrainsMonoNL Nerd Font
+font-size = 14
+cursor-style = block
+cursor-style-blink = false
+cursor-invert-fg-bg = true
+
+macos-titlebar-style = hidden
+macos-option-as-alt = true
+mouse-hide-while-typing = true
+
+confirm-close-surface = false
+window-padding-x = 10
+window-padding-y = 10
+window-padding-balance = false
