@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty'
 import { intro, outro, multiselect, spinner, cancel } from '@clack/prompts'
 import { execa } from 'execa'
+import { existsSync, readdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { resolve } from 'path'
 import pc from 'picocolors'
@@ -31,7 +32,7 @@ async function getPendingFiles(): Promise<Set<string>> {
     const { stdout } = await chezmoi(['status'])
     return new Set(
       stdout.trim().split('\n').filter(Boolean)
-        .map(line => resolve(homedir(), line.slice(2)))
+        .map(line => resolve(homedir(), line.slice(2).trim()))
     )
   } catch {
     return new Set()
@@ -40,13 +41,44 @@ async function getPendingFiles(): Promise<Set<string>> {
 
 type SyncStatus = 'pending' | 'new' | 'partial' | 'synced'
 
+function isPathPending(f: string, pending: Set<string>): boolean {
+  if (pending.has(f)) return true
+  const prefix = f.endsWith('/') ? f : f + '/'
+  return Array.from(pending).some(p => p.startsWith(prefix))
+}
+
+function isPathManaged(f: string, managed: Set<string>): boolean {
+  if (managed.has(f)) return true
+  const prefix = f.endsWith('/') ? f : f + '/'
+  return Array.from(managed).some(p => p.startsWith(prefix))
+}
+
+/** Returns true if a directory has any immediate child (file or dir) not tracked in managed. */
+function hasUntrackedDirChild(dir: string, managed: Set<string>): boolean {
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.DS_Store') continue
+      const full = resolve(dir, entry.name)
+      const prefix = full + '/'
+      const tracked = managed.has(full) || Array.from(managed).some(f => f.startsWith(prefix))
+      if (!tracked) return true
+    }
+  } catch {}
+  return false
+}
+
+function isDir(f: string): boolean {
+  try { return statSync(f).isDirectory() } catch { return false }
+}
+
 function getToolStatus(sync: { files: { source: string }[] }, managed: Set<string>, pending: Set<string>): SyncStatus {
   const files = sync.files.map(f => expandHome(f.source))
-  const managedCount = files.filter(f => managed.has(f)).length
+  const managedCount = files.filter(f => isPathManaged(f, managed)).length
 
   if (managedCount === 0) return 'new'
   if (managedCount < files.length) return 'partial'
-  if (files.some(f => pending.has(f))) return 'pending'
+  if (files.some(f => isPathPending(f, pending))) return 'pending'
+  if (files.some(f => isDir(f) && hasUntrackedDirChild(f, managed))) return 'pending'
   return 'synced'
 }
 
@@ -64,12 +96,10 @@ function toolPriority(status: SyncStatus): number {
   return 3
 }
 
-async function syncTool(tool: Tool, managed: Set<string>): Promise<void> {
+async function syncTool(tool: Tool): Promise<void> {
   for (const { source } of tool.sync!.files) {
     const dest = expandHome(source)
-    if (managed.has(dest)) {
-      await chezmoi(['apply', dest])
-    } else {
+    if (existsSync(dest)) {
       await chezmoi(['add', dest])
     }
   }
@@ -103,7 +133,12 @@ export default defineCommand({
       .sort((a, b) => a._priority - b._priority)
 
     const preSelected = managedTools
-      .filter(tool => getToolStatus(tool.sync!, managed, pending) !== 'new')
+      .filter(tool => {
+        const status = getToolStatus(tool.sync!, managed, pending)
+        if (status !== 'new') return true
+        // pre-select new tools that have at least one source file on the system
+        return tool.sync!.files.some(f => existsSync(expandHome(f.source)))
+      })
       .map(tool => tool.name)
 
     const selected = await multiselect({
@@ -127,7 +162,7 @@ export default defineCommand({
     for (const name of selectedTools) {
       sp.start(`Syncing ${pc.cyan(name)}...`)
       try {
-        await syncTool(toolMap.get(name)!, managed)
+        await syncTool(toolMap.get(name)!)
         sp.stop(`${pc.green('✓')} ${name}`)
         results.push({ name, ok: true })
       } catch (err: any) {

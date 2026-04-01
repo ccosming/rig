@@ -3,7 +3,7 @@ import { intro, outro, log, spinner, confirm, cancel } from '@clack/prompts'
 import { execa } from 'execa'
 import pc from 'picocolors'
 import { SPINNER_FRAMES, RIG_DIR } from '../lib/constants.ts'
-import { loadRegistry, allTools, isCore, isManaged, isTracked, hasDotfiles, hasSystemFiles } from '../lib/registry.ts'
+import { loadRegistry, allTools, isCore, isManaged, hasSystemFiles } from '../lib/registry.ts'
 import { resolve } from 'path'
 import { homedir } from 'os'
 
@@ -70,11 +70,14 @@ async function runChecks(registry: ReturnType<typeof loadRegistry>): Promise<Che
 
   const trackedTools = tools.filter(t => (t.required || isManaged(t)) && !isCore(t))
 
-  const [protoStatus, pendingFiles] = await Promise.all([
+  const [protoStatus, pendingFiles, managedFiles] = await Promise.all([
     execa('proto', ['status', '-c', 'global', '--json'])
       .then(r => JSON.parse(r.stdout) as Record<string, any>)
       .catch(() => ({} as Record<string, any>)),
     getPendingFiles(),
+    execa('chezmoi', ['-S', DOTFILES_DIR, 'managed', '--path-style', 'absolute'])
+      .then(r => new Set(r.stdout.trim().split('\n').filter(Boolean)))
+      .catch(() => new Set<string>()),
   ])
 
   const [coreResults, toolResults] = await Promise.all([
@@ -87,7 +90,12 @@ async function runChecks(registry: ReturnType<typeof loadRegistry>): Promise<Che
     Promise.all(
       trackedTools.map(async (tool): Promise<CheckResult> => {
         const toolType: ToolType = isManaged(tool) ? 'managed' : 'required'
-        const dotfiles    = isManaged(tool) ? hasDotfiles(tool, DOTFILES_DIR) : undefined
+        const dotfiles    = isManaged(tool)
+          ? tool.sync!.files.some(f => {
+              const abs = f.source.startsWith('~/') ? resolve(homedir(), f.source.slice(2)) : f.source
+              return managedFiles.has(abs)
+            })
+          : undefined
         const systemFiles = isManaged(tool) ? hasSystemFiles(tool) : undefined
         const pending     = dotfiles
           ? tool.sync!.files.some(f => {

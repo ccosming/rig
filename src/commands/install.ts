@@ -1,9 +1,9 @@
 import { defineCommand } from 'citty'
-import { intro, outro, multiselect, confirm, spinner, cancel, log } from '@clack/prompts'
+import { intro, outro, confirm, spinner, cancel, log } from '@clack/prompts'
 import { execa } from 'execa'
 import pc from 'picocolors'
 import { SPINNER_FRAMES } from '../lib/constants.ts'
-import { loadRegistry, toolId, allTools, type Registry, type Tool, type PackageGroup } from '../lib/registry.ts'
+import { loadRegistry, toolId, allTools, type Registry, type Tool } from '../lib/registry.ts'
 
 interface VersionInfo {
   current: string
@@ -144,6 +144,85 @@ function upgradeTool(t: Tool) {
     : execa('brew', ['upgrade', t.name])
 }
 
+async function tabSelect(
+  message: string,
+  groups: Record<string, SelectOption[]>,
+  initialValues: string[]
+): Promise<string[] | null> {
+  const keys = Object.keys(groups)
+  const selected = new Set<string>(initialValues)
+  let tab = 0
+  let cur = 0
+
+  const strip = (s: string) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+
+  function draw() {
+    process.stdout.write('\x1b[u\x1b[J')
+
+    // Tab bar: emoji only, active inverted
+    const bar = keys.map((k, i) => {
+      const emoji = k.split(' ')[0]
+      return i === tab ? pc.bgCyan(pc.black(` ${emoji} `)) : pc.dim(` ${emoji} `)
+    }).join('')
+    process.stdout.write('  ' + bar + '\n')
+
+    // Active group name + divider
+    const name = keys[tab].split(' ').slice(1).join(' ')
+    process.stdout.write('  ' + pc.bold(name) + '\n')
+    process.stdout.write('  ' + pc.dim('─'.repeat(48)) + '\n\n')
+
+    // Tools
+    for (let i = 0; i < groups[keys[tab]].length; i++) {
+      const t = groups[keys[tab]][i]
+      const box = selected.has(t.value) ? pc.green('■') : pc.dim('□')
+      const ptr = i === cur ? pc.cyan('›') : ' '
+      const hint = strip(t.hint ?? '').slice(0, 58)
+      process.stdout.write(`  ${ptr} ${box} ${t.label}  ${pc.dim(hint)}\n`)
+    }
+
+    process.stdout.write('\n')
+    process.stdout.write(pc.dim('  ←/→ tab   ↑/↓ move   space select   enter confirm\n'))
+  }
+
+  process.stdout.write(`${pc.cyan('◆')} ${message}\n\n`)
+  process.stdout.write('\x1b[?25l\x1b[s')
+  draw()
+
+  return new Promise(resolve => {
+    process.stdin.setRawMode(true)
+    process.stdin.resume()
+    process.stdin.setEncoding('utf8')
+
+    const finish = (res: string[] | null) => {
+      process.stdin.removeListener('data', onKey)
+      process.stdin.setRawMode(false)
+      process.stdin.pause()
+      process.stdout.write('\x1b[?25h\x1b[u\x1b[J')
+      resolve(res)
+    }
+
+    const onKey = (key: string) => {
+      if (key === '\x03') return finish(null)
+      if (key === '\r')   return finish([...selected])
+
+      const tools = groups[keys[tab]]
+
+      if      (key === '\x1b[D' || key === '\x1b[Z') { tab = (tab - 1 + keys.length) % keys.length; cur = 0 }
+      else if (key === '\x1b[C' || key === '\t')      { tab = (tab + 1) % keys.length; cur = 0 }
+      else if (key === '\x1b[A') { cur = Math.max(0, cur - 1) }
+      else if (key === '\x1b[B') { cur = Math.min(tools.length - 1, cur + 1) }
+      else if (key === ' ') {
+        const v = tools[cur].value
+        selected.has(v) ? selected.delete(v) : selected.add(v)
+      }
+
+      draw()
+    }
+
+    process.stdin.on('data', onKey)
+  })
+}
+
 export default defineCommand({
   meta: { description: 'Install tools from the registry' },
   args: {
@@ -162,81 +241,82 @@ export default defineCommand({
     const status = await getPackageStatus()
     s.stop(buildSummary(registry, status))
 
-    const rawTools: { option: SelectOption, tool: Tool }[] = Object.entries(registry.packages).flatMap(
-      ([category, group]) =>
-        group.tools
-          .filter(t => t.type || t.installer)  // skip non-installable tools (e.g. system zsh)
-          .map(t => {
-            const id = toolId(t)
-            return {
-              tool: t,
-              option: {
-                value: id,
-                label: status.outdated.has(id)
-                  ? pc.yellow(t.name.toLowerCase())
-                  : status.versions.has(id)
-                    ? pc.green(t.name.toLowerCase())
-                    : t.required
-                      ? pc.magenta(t.name.toLowerCase())
-                      : t.name.toLowerCase(),
-                hint: buildHint(id, category, group.emoji, t.description, status, t.required),
-                type: t.type ?? 'formula',
-                required: t.required ?? false,
-              },
-            }
-          })
-    )
+    const isUpToDate = (id: string) =>
+      status.versions.has(id) && !status.outdated.has(id)
 
-    const allTools = rawTools.map(r => r.option)
-    const toolMap  = new Map(rawTools.map(r => [r.option.value, r.tool]))
-
-    const isUpToDate = (t: SelectOption) =>
-      status.versions.has(t.value) && !status.outdated.has(t.value)
-
-    const toolPriority = (t: SelectOption) => {
-      if (t.required && !status.versions.has(t.value)) return 0
-      if (status.outdated.has(t.value))                return 1
-      if (!status.versions.has(t.value))               return 2
+    const toolPriority = (id: string, required = false) => {
+      if (required && !status.versions.has(id)) return 0
+      if (status.outdated.has(id))              return 1
+      if (!status.versions.has(id))             return 2
       return 3
     }
-    allTools.sort((a, b) => toolPriority(a) - toolPriority(b))
 
-    const visibleTools = args.all
-      ? allTools
-      : allTools.filter(t => !isUpToDate(t))
+    const toolMap = new Map<string, Tool>()
 
-    if (visibleTools.length === 0) {
+    // Build grouped options: one entry per category, only non-empty groups
+    const groupedOptions: Record<string, SelectOption[]> = {}
+    let totalVisible = 0
+    let totalHidden  = 0
+
+    for (const [category, group] of Object.entries(registry.packages)) {
+      const installable = group.tools.filter(t => t.type || t.installer)
+      const options: SelectOption[] = []
+
+      for (const t of installable) {
+        const id = toolId(t)
+        toolMap.set(id, t)
+        if (!args.all && isUpToDate(id)) { totalHidden++; continue }
+        options.push({
+          value: id,
+          label: status.outdated.has(id)
+            ? pc.yellow(t.name.toLowerCase())
+            : status.versions.has(id)
+              ? pc.green(t.name.toLowerCase())
+              : t.required
+                ? pc.magenta(t.name.toLowerCase())
+                : t.name.toLowerCase(),
+          hint: buildHint(id, category, group.emoji, t.description, status, t.required),
+          type: t.type ?? 'formula',
+          required: t.required ?? false,
+        })
+      }
+
+      options.sort((a, b) =>
+        toolPriority(a.value, a.required) - toolPriority(b.value, b.required)
+      )
+
+      if (options.length > 0) {
+        groupedOptions[`${group.emoji} ${category}`] = options
+        totalVisible += options.length
+      }
+    }
+
+    if (totalVisible === 0) {
       outro(pc.green('Everything is up to date. Run with --all to see all tools.'))
       process.exit(0)
     }
 
-    if (!args.all) {
-      const hiddenCount = allTools.length - visibleTools.length
-      if (hiddenCount > 0)
-        log.info(`${hiddenCount} up-to-date tool(s) hidden — run with ${pc.cyan('--all')} to show`)
-    }
+    if (!args.all && totalHidden > 0)
+      log.info(`${totalHidden} up-to-date tool(s) hidden — run with ${pc.cyan('--all')} to show`)
 
-    const preSelected = visibleTools
+    const allVisible = Object.values(groupedOptions).flat()
+
+    const outdatedCount = allVisible.filter(t => status.outdated.has(t.value)).length
+    if (outdatedCount > 0)
+      log.warn(`${outdatedCount} tool(s) have updates available — pre-selected`)
+
+    const preSelected = allVisible
       .filter(t => status.versions.has(t.value) || t.required)
       .map(t => t.value)
 
-    const outdatedInRegistry = visibleTools.filter(t => status.outdated.has(t.value))
-    if (outdatedInRegistry.length > 0)
-      log.warn(`${outdatedInRegistry.length} tool(s) have updates available — pre-selected`)
+    const result = await tabSelect('Select tools to install', groupedOptions, preSelected)
 
-    const selected = await multiselect({
-      message: 'Select tools to install',
-      options: visibleTools,
-      initialValues: preSelected,
-      required: true,
-    })
-
-    if (typeof selected === 'symbol') {
+    if (result === null) {
       cancel('Cancelled.')
       process.exit(0)
     }
 
-    const selectedPkgs = selected as string[]
+    const selectedPkgs = result
 
     const toInstall = selectedPkgs.filter(p => !status.versions.has(p))
     const toUpgrade = selectedPkgs.filter(p => status.outdated.has(p))

@@ -83,6 +83,7 @@ packages:
           files:
             - source: ~/Library/Application Support/VSCodium/User/settings.json
             - source: ~/Library/Application Support/VSCodium/User/keybindings.json
+            - source: ~/Library/Application Support/VSCodium/User/profiles
 
       - name: cursor
         description: AI-first code editor
@@ -131,6 +132,10 @@ packages:
         description: Agentic AI coding CLI by Anthropic
         type: cask
         required: true
+
+      - name: rtk
+        description: Filters CLI noise so AI agents get clean, actionable output
+        type: formula
 
   runtimes:
     emoji: ⚙️
@@ -208,3 +213,10 @@ packages:
         sync:
           files:
             - source: ~/.zshrc
+
+  misc:
+    emoji: ✨
+    tools:
+      - name: font-hack
+        description: A typeface designed for source code
+        type: cask
